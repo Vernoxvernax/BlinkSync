@@ -216,7 +216,8 @@ fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, sin
       {
         let vids = serde_json::from_str::<Media>(&txt).unwrap();
 
-        if vids.media.is_empty() {
+        if vids.media.is_empty()
+        {
           break;
         }
 
@@ -244,7 +245,8 @@ fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, sin
 
     }
 
-    if nothing {
+    if nothing
+    {
       println!("Nothing new to download.");
     }
     else
@@ -258,12 +260,19 @@ fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, sin
 
 fn download_video(url: String, auth_header: Header, output: String) -> Result<(), ()>
 {
-  let res = Request::builder()
+  let request = Request::builder()
     .method(Method::GET)
     .uri(url)
     .header(auth_header.key, auth_header.value)
     .body(()).unwrap()
-  .send().unwrap();
+  .send();
+
+  if request.is_err()
+  {
+    return Err(());
+  }
+
+  let res = request.unwrap();
 
   println!("Saving: {:?}", output);
 
@@ -275,11 +284,18 @@ fn download_video(url: String, auth_header: Header, output: String) -> Result<()
 
 fn blink_get(url: String, header: Header) -> Result<String, ()>
 {
-  let mut response = Request::get(url)
+  let request = Request::get(url)
     .method(Method::GET)
     .header(header.key, header.value)
   .body(()).unwrap()
-  .send().unwrap();
+  .send();
+
+  if request.is_err()
+  {
+    return Err(())
+  }
+
+  let mut response = request.unwrap();
 
   match response.status()
   {
@@ -295,16 +311,23 @@ fn blink_get(url: String, header: Header) -> Result<String, ()>
 
 fn blink_post(domain: &str, url: &str, header: Header, header2: Option<Header>, body: String) -> Result<String, ()>
 {
-  let mut request = Request::builder()
+  let mut builder = Request::builder()
     .uri(format!("https://{}/{}", domain, url))
     .method(Method::POST)
   .header(header.key, header.value);
 
   if let Some(header) = header2 {
-    request = request.header(header.key, header.value);
+    builder = builder.header(header.key, header.value);
   }
 
-  let mut response = request.body(body).unwrap().send().unwrap();
+  let request = builder.body(body).unwrap().send();
+
+  if request.is_err()
+  {
+    return Err(());
+  }
+
+  let mut response = request.unwrap();
 
   match response.status()
   {
