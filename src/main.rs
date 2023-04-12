@@ -137,58 +137,61 @@ fn main() -> ExitCode {
       };
       let body: String = format!("{{\"unique_id\": \"00000000-0000-0000-0000-000000000000\", \"password\":\"{}\",\"email\":\"{}\", \"reauth\": \"true\"}}", password, email);
 
-      if let Ok(res) = blink_post(&domain, "api/v5/account/login", header, None, body)
+      loop
       {
-        let json_res = serde_json::from_str::<Login>(&res).unwrap();
-        let domain = if cli.get_one::<String>("domain").is_some() {
-          cli.get_one::<String>("domain").unwrap().to_string()
-        }
-        else
+        if let Ok(res) = blink_post(&domain, "api/v5/account/login", header.clone(), None, body.clone())
         {
-          "rest-".to_owned()+&json_res.account.tier+".immedia-semi.com"
-        };
-        let auth_header: Header = Header {
-          key: "TOKEN-AUTH".to_string(),
-          value: json_res.auth.token.clone()
-        };
-
-        if json_res.account.client_verification_required
-        {
-          print!("Please enter the pin for the device-verification.\n: ");
-          let pin = get_input();
-
-
-          let url = format!("api/v4/account/{}/client/{}/pin/verify", json_res.account.account_id, json_res.account.client_id);
-          let header: Header = Header {
-            key: "Content-Type".to_string(),
-            value: "application/json".to_string()
+          let json_res = serde_json::from_str::<Login>(&res).unwrap();
+          let domain = if cli.get_one::<String>("domain").is_some() {
+            cli.get_one::<String>("domain").unwrap().to_string()
+          }
+          else
+          {
+            "rest-".to_owned()+&json_res.account.tier+".immedia-semi.com"
           };
           let auth_header: Header = Header {
             key: "TOKEN-AUTH".to_string(),
             value: json_res.auth.token.clone()
           };
 
-          let verify = blink_post(&domain, &url, header, Some(auth_header.clone()), format!("{{\"pin\": {} }}", pin));
-
-          if verify.is_err()
+          if json_res.account.client_verification_required
           {
-            println!("Invalid pin provided. Please try again ...");
+            print!("Please enter the pin for the device-verification.\n: ");
+            let pin = get_input();
+
+
+            let url = format!("api/v4/account/{}/client/{}/pin/verify", json_res.account.account_id, json_res.account.client_id);
+            let header: Header = Header {
+              key: "Content-Type".to_string(),
+              value: "application/json".to_string()
+            };
+            let auth_header: Header = Header {
+              key: "TOKEN-AUTH".to_string(),
+              value: json_res.auth.token.clone()
+            };
+
+            let verify = blink_post(&domain, &url, header, Some(auth_header.clone()), format!("{{\"pin\": {} }}", pin));
+
+            if verify.is_err()
+            {
+              println!("Invalid pin provided. Please try again ...");
+            }
+            else
+            {
+              println!("Success");
+              blink_sync(domain, json_res, auth_header, *wait, since);
+            }
           }
           else
           {
-            println!("Success");
             blink_sync(domain, json_res, auth_header, *wait, since);
           }
         }
         else
         {
-          blink_sync(domain, json_res, auth_header, *wait, since);
+          println!("Login credentials incorrect. Please try again ...");
+          return ExitCode::FAILURE;
         }
-      }
-      else
-      {
-        println!("Login credentials incorrect. Please try again ...");
-        return ExitCode::FAILURE;
       }
     }
     false => ()
@@ -241,6 +244,10 @@ fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, sin
         }
 
         page += 1;
+      }
+      else
+      {
+        return
       }
 
     }
