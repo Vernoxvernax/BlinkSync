@@ -184,6 +184,7 @@ fn main() -> ExitCode {
           }
           else
           {
+            thread::sleep(Duration::from_secs(*wait as u64));
             blink_sync(domain, json_res, auth_header, *wait, since);
           }
         }
@@ -215,41 +216,41 @@ fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, sin
     {
       let url = format!("https://{}/api/v1/accounts/{}/media/changed?since={}&page={}",
       domain, session.account.account_id, timestamp, page);
-      if let Ok(txt) = blink_get(url, auth_header.clone())
+      match blink_get(url, auth_header.clone())
       {
-        let vids = serde_json::from_str::<Media>(&txt).unwrap();
-
-        if vids.media.is_empty()
-        {
-          break;
-        }
-
-        for video in vids.media
-        {
-          let output = format!("./downloads/{}_{}_{}.mp4",
-          video.network_name, video.device_name, video.created_at);
-
-          if video.deleted || fs::metadata(output.clone()).is_ok() {
-            continue;
-          }
-          else
+        Ok(txt) => {
+          let vids = serde_json::from_str::<Media>(&txt).unwrap();
+  
+          if vids.media.is_empty()
           {
-            nothing = false;
+            break;
           }
-
-          fs::create_dir_all("./downloads").unwrap();
-
-          let url = format!("https://{}{}", domain, video.media);
-          download_video(url, auth_header.clone(), output).unwrap();
+  
+          for video in vids.media
+          {
+            let output = format!("./downloads/{}_{}_{}.mp4",
+            video.network_name, video.device_name, video.created_at);
+  
+            if video.deleted || fs::metadata(output.clone()).is_ok() {
+              continue;
+            }
+            else
+            {
+              nothing = false;
+            }
+  
+            fs::create_dir_all("./downloads").unwrap();
+  
+            let url = format!("https://{}{}", domain, video.media);
+            download_video(url, auth_header.clone(), output).unwrap();
+          }
+  
+          page += 1;
+        },
+        Err(_) => {
+          return;
         }
-
-        page += 1;
       }
-      else
-      {
-        return
-      }
-
     }
 
     if nothing
@@ -299,7 +300,8 @@ fn blink_get(url: String, header: Header) -> Result<String, ()>
 
   if request.is_err()
   {
-    return Err(())
+    println!("Error: {}", request.unwrap_err().to_string());
+    return Err(());
   }
 
   let mut response = request.unwrap();
