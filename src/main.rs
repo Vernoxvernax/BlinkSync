@@ -184,8 +184,8 @@ fn main() -> ExitCode {
           }
           else
           {
-            thread::sleep(Duration::from_secs(*wait as u64));
             blink_sync(domain, json_res, auth_header, *wait, since);
+            thread::sleep(Duration::from_secs(*wait as u64));
           }
         }
         else
@@ -333,6 +333,7 @@ fn blink_post(domain: &str, url: &str, header: Header, header2: Option<Header>, 
 
   if request.is_err()
   {
+    println!("Error: {}", request.unwrap_err().to_string());
     return Err(());
   }
 
