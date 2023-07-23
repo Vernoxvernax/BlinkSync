@@ -4,7 +4,7 @@ use std::{process::ExitCode, io::{self, Write, copy}, thread, time::Duration, fs
 use clap::{Arg, Command, ArgAction};
 use isahc::{Request, RequestExt, ReadResponseExt};
 use http::{StatusCode, Method};
-use serde_derive::{Deserialize};
+use serde_derive::Deserialize;
 use chrono::Utc;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -190,8 +190,8 @@ fn main() -> ExitCode {
         }
         else
         {
-          println!("Login credentials incorrect. Please try again ...");
-          return ExitCode::FAILURE;
+          println!("Failed to login. Retrying ...");
+          thread::sleep(Duration::from_secs(*wait as u64));
         }
       }
     }
@@ -242,7 +242,11 @@ fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, sin
             fs::create_dir_all("./downloads").unwrap();
   
             let url = format!("https://{}{}", domain, video.media);
-            download_video(url, auth_header.clone(), output).unwrap();
+            loop {
+              if download_video(&url, auth_header.clone(), &output).is_ok() {
+                break;
+              }
+            }
           }
   
           page += 1;
@@ -266,7 +270,7 @@ fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, sin
   }
 }
 
-fn download_video(url: String, auth_header: Header, output: String) -> Result<(), ()>
+fn download_video(url: &String, auth_header: Header, output: &String) -> Result<(), ()>
 {
   let request = Request::builder()
     .method(Method::GET)
@@ -285,7 +289,9 @@ fn download_video(url: String, auth_header: Header, output: String) -> Result<()
   println!("Saving: {:?}", output);
 
   let mut file = File::create(output).unwrap();
-  copy(&mut res.into_body(), &mut file).unwrap();
+  if copy(&mut res.into_body(), &mut file).is_err() {
+    return Err(());
+  };
   Ok(())
 }
 
