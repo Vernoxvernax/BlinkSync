@@ -353,12 +353,14 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
                 thread::sleep(Duration::from_secs(10 as u64));
                 continue;
               };
-    
+
               fs::create_dir_all(format!("./{}", download_folder)).unwrap();
-    
+              
+              thread::sleep(Duration::from_secs(1 as u64));
+
               for _ in 1..10 {
                 if download_video(&url_clip, auth_header.clone(), &output).is_ok() {
-                  thread::sleep(Duration::from_secs(3 as u64));
+                  thread::sleep(Duration::from_secs(5 as u64));
                   break;
                 }
                 thread::sleep(Duration::from_secs(15 as u64));
@@ -396,6 +398,9 @@ fn download_video(url: &String, auth_header: Header, output: &String) -> Result<
   }
 
   let res = request.unwrap();
+  if res.status() != StatusCode::OK {
+    return Err(());
+  }
 
   println!("Saving: {:?}", output);
 
