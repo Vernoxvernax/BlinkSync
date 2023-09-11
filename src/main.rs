@@ -339,33 +339,31 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
             for video in full_manifest.clips {
               let output = format!("./{}/{}_{}_{}.mp4",
               download_folder, network_name, video.camera_name, video.created_at.replace(":", "-"));
-
+              
               if fs::metadata(output.clone()).is_ok() {
                 continue;
               } else {
                 nothing = false;
               }
-
-              // The clip has to be uploaded to blink's servers to download it.
+              
+              // The clip has to be uploaded to blink's servers first to download it.
               let url_clip = format!("https://{}/api/v1/accounts/{}/networks/{}/sync_modules/{}/local_storage/manifest/{}/clip/request/{}",
               regional_domain, session.account.account_id, sync_module.network_id, sync_module.id, manifest_info.id, video.id);
-              if let Err(_) = blink_post(&url_clip, auth_header.clone(), None, String::from("")) {
-                println!("Upload failed. Continuing ...");
+              
+              if let Err(()) = blink_post(&url_clip, auth_header.clone(), None, String::from("")) {
+                println!("Upload failed. Continuing in 10 seconds ...");
                 thread::sleep(Duration::from_secs(10 as u64));
                 continue;
               };
 
+              thread::sleep(Duration::from_secs(5 as u64));
               fs::create_dir_all(format!("./{}", download_folder)).unwrap();
-              
-              thread::sleep(Duration::from_secs(1 as u64));
 
-              for _ in 1..10 {
-                if download_video(&url_clip, auth_header.clone(), &output).is_ok() {
-                  thread::sleep(Duration::from_secs(5 as u64));
-                  break;
-                }
-                println!("Retrying download in 15 seconds.");
-                thread::sleep(Duration::from_secs(15 as u64));
+              if download_video(&url_clip, auth_header.clone(), &output).is_ok() {
+                thread::sleep(Duration::from_secs(5 as u64));
+              } else {
+                println!("Download Failed. Trying next clip ...");
+                thread::sleep(Duration::from_secs(5 as u64));
               }
             }
           }
@@ -401,6 +399,7 @@ fn download_video(url: &String, auth_header: Header, output: &String) -> Result<
 
   let res = request.unwrap();
   if res.status() != StatusCode::OK {
+    // println!("{:?}", res.text().unwrap());
     return Err(());
   }
 
