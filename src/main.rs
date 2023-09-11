@@ -350,6 +350,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
               let url_clip = format!("https://{}/api/v1/accounts/{}/networks/{}/sync_modules/{}/local_storage/manifest/{}/clip/request/{}",
               regional_domain, session.account.account_id, sync_module.network_id, sync_module.id, manifest_info.id, video.id);
               if let Err(_) = blink_post(&url_clip, auth_header.clone(), None, String::from("")) {
+                println!("Upload failed. Continuing ...");
                 thread::sleep(Duration::from_secs(10 as u64));
                 continue;
               };
@@ -363,6 +364,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
                   thread::sleep(Duration::from_secs(5 as u64));
                   break;
                 }
+                println!("Retrying download in 15 seconds.");
                 thread::sleep(Duration::from_secs(15 as u64));
               }
             }
