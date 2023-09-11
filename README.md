@@ -14,9 +14,14 @@ Arguments:
   <password>  Blink Account Password
 
 Options:
-  -d <domain>      Alternative api domain
-  -w <wait>        How many seconds to wait in between checks (default=120)
-  -s <since>       Download media which has been changed, this many minutes ago (default=10)
+  -d <domain>                    Alternative API domain
+  -w <wait>                      How many seconds to wait in between checks (default=120)
+  -s <since>                     Download media which has been changed this many minutes ago (default=10)
+  -o <output-folder>             A custom output folder location
+      --disable-cloud-downloads  Don't download videos from the cloud
+      --enable-local-downloads   Download local videos from all sync-modules
+  -h, --help                     Print help
+  -V, --version                  Print version
 ```
 
 ___
@@ -24,7 +29,10 @@ ___
 ## Thanks
 
 [MattTW/BlinkMonitorProtocol](https://github.com/MattTW/BlinkMonitorProtocol)
+
 [nayrk/Unofficial Amazon Blink Video Downloader](https://github.com/nayrk/Blink/blob/master/BlinkVideoDownloader.ps1)
+
+[fronzbot/blinkpy](https://github.com/fronzbot/blinkpy#sync-module-local-storage)
 
 ___
 

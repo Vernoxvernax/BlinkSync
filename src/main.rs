@@ -10,21 +10,18 @@ use chrono::Utc;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone)]
-struct Header
-{
+struct Header {
   key: String,
   value: String
 }
 
 #[derive(Debug, Deserialize)]
-struct Media
-{
+struct Media {
   media: Vec<Video>
 }
 
 #[derive(Debug, Deserialize)]
-struct Video
-{
+struct Video {
   media: String,
   created_at: String,
   network_name: String,
@@ -33,15 +30,13 @@ struct Video
 }
 
 #[derive(Debug, Deserialize)]
-struct Login
-{
+struct Login {
   account: AccountLogin,
   auth: Auth
 }
 
 #[derive(Debug, Deserialize)]
-struct AccountLogin
-{
+struct AccountLogin {
   account_id: u64,
   client_id: u64,
   tier: String,
@@ -49,9 +44,44 @@ struct AccountLogin
 }
 
 #[derive(Debug, Deserialize)]
-struct Auth
-{
+struct Auth {
   token: String
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Homescreen {
+  networks: Vec<Network>,
+  sync_modules: Vec<SyncModules>
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Network {
+  id: u32,
+  name: String
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SyncModules {
+  id: u32,
+  network_id: u32,
+  local_storage_status: String
+}
+
+#[derive(Debug, Deserialize)]
+struct SyncManifestInfo {
+  id: u64
+}
+
+#[derive(Debug, Deserialize)]
+struct SyncManifest {
+  clips: Vec<LocalClips>
+}
+
+#[derive(Debug, Deserialize)]
+struct LocalClips {
+  id: String,
+  camera_name: String,
+  created_at: String
 }
 
 fn main() -> ExitCode {
@@ -76,7 +106,7 @@ fn main() -> ExitCode {
     .arg(
       Arg::new("domain")
       .short('d')
-      .help("alternative api domain")
+      .help("Alternative API domain")
       .required(false)
       .action(ArgAction::Set)
       .num_args(1)
@@ -84,7 +114,7 @@ fn main() -> ExitCode {
     .arg(
       Arg::new("wait")
       .short('w')
-      .help("how many seconds to wait in between checks (default=120)")
+      .help("How many seconds to wait in between checks (default=120)")
       .required(false)
       .action(ArgAction::Set)
       .num_args(1)
@@ -92,44 +122,64 @@ fn main() -> ExitCode {
     .arg(
       Arg::new("since")
       .short('s')
-      .help("download media which has been changed this many minutes ago (default=10)")
+      .help("Download media which has been changed this many minutes ago (default=10)")
       .required(false)
       .action(ArgAction::Set)
       .num_args(1)
     )
+    .arg(
+      Arg::new("output-folder")
+      .short('o')
+      .help("A custom output folder location")
+      .required(false)
+      .num_args(1)
+    )
+    .arg(
+      Arg::new("cloud-media")
+      .long("disable-cloud-downloads")
+      .help("Don't download videos from the cloud")
+      .required(false)
+      .action(ArgAction::SetTrue)
+    )
+    .arg(
+      Arg::new("local-media")
+      .long("enable-local-downloads")
+      .help("Download local videos from all sync-modules")
+      .required(false)
+      .action(ArgAction::SetTrue)
+    )
   .get_matches();
-  match cli.args_present()
-  {
+  match cli.args_present() {
     true => {
       let email = cli.get_one::<String>("email").unwrap();
       let password = cli.get_one::<String>("password").unwrap();
 
-      let domain = if cli.get_one::<String>("domain").is_some()
-      {
+      let global_domain = if cli.get_one::<String>("domain").is_some() {
         cli.get_one::<String>("domain").unwrap().to_string()
-      }
-      else
-      {
+      } else {
         String::from("rest-prod.immedia-semi.com")
       };
 
-      let wait = if cli.get_one::<u8>("wait").is_some()
-      {
+      let wait = if cli.get_one::<u8>("wait").is_some() {
         cli.get_one::<u8>("wait").unwrap()
-      }
-      else
-      {
+      } else {
         &120
       };
 
-      let since = if cli.get_one::<String>("since").is_some()
-      {
+      let since = if cli.get_one::<String>("since").is_some() {
         cli.get_one::<String>("since").unwrap().parse::<u64>().unwrap()
-      }
-      else
-      {
+      } else {
         10
       };
+
+      let download_folder = if cli.get_one::<String>("output-folder").is_some() {
+        cli.get_one::<String>("output-folder").unwrap()
+      } else {
+        "downloads"
+      };
+
+      let download_cloud_media = !cli.get_flag("cloud-media");
+      let download_local_media = cli.get_flag("local-media");
 
       let header: Header = Header {
         key: "Content-Type".to_string(),
@@ -137,16 +187,12 @@ fn main() -> ExitCode {
       };
       let body: String = format!("{{\"unique_id\": \"00000000-0000-0000-0000-000000000000\", \"password\":\"{}\",\"email\":\"{}\", \"reauth\": \"true\"}}", password, email);
 
-      loop
-      {
-        if let Ok(res) = blink_post(&domain, "api/v5/account/login", header.clone(), None, body.clone())
-        {
+      loop {
+        if let Ok(res) = blink_post(&format!("https://{}/api/v5/account/login", global_domain), header.clone(), None, body.clone()) {
           let json_res = serde_json::from_str::<Login>(&res).unwrap();
-          let domain = if cli.get_one::<String>("domain").is_some() {
+          let region_domain = if cli.get_one::<String>("domain").is_some() {
             cli.get_one::<String>("domain").unwrap().to_string()
-          }
-          else
-          {
+          } else {
             "rest-".to_owned()+&json_res.account.tier+".immedia-semi.com"
           };
           let auth_header: Header = Header {
@@ -154,13 +200,12 @@ fn main() -> ExitCode {
             value: json_res.auth.token.clone()
           };
 
-          if json_res.account.client_verification_required
-          {
+          if json_res.account.client_verification_required {
             print!("Please enter the pin for the device-verification.\n: ");
             let pin = get_input();
 
 
-            let url = format!("api/v4/account/{}/client/{}/pin/verify", json_res.account.account_id, json_res.account.client_id);
+            let url = format!("https://{}/api/v4/account/{}/client/{}/pin/verify", region_domain, json_res.account.account_id, json_res.account.client_id);
             let header: Header = Header {
               key: "Content-Type".to_string(),
               value: "application/json".to_string()
@@ -170,26 +215,19 @@ fn main() -> ExitCode {
               value: json_res.auth.token.clone()
             };
 
-            let verify = blink_post(&domain, &url, header, Some(auth_header.clone()), format!("{{\"pin\": {} }}", pin));
+            let verify_request = blink_post(&url, header, Some(auth_header.clone()), format!("{{\"pin\": {} }}", pin));
 
-            if verify.is_err()
-            {
+            if verify_request.is_err() {
               println!("Invalid pin provided. Please try again ...");
-            }
-            else
-            {
+            } else {
               println!("Success");
-              blink_sync(domain, json_res, auth_header, *wait, since);
+              blink_sync(&region_domain, json_res, auth_header, *wait, since, download_folder, download_cloud_media, download_local_media);
             }
-          }
-          else
-          {
-            blink_sync(domain, json_res, auth_header, *wait, since);
+          } else {
+            blink_sync(&region_domain, json_res, auth_header, *wait, since, download_folder, download_cloud_media, download_local_media);
             thread::sleep(Duration::from_secs(*wait as u64));
           }
-        }
-        else
-        {
+        } else {
           println!("Failed to login. Retrying ...");
           thread::sleep(Duration::from_secs(*wait as u64));
         }
@@ -201,10 +239,9 @@ fn main() -> ExitCode {
   ExitCode::SUCCESS
 }
 
-fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, since: u64)
-{
-  loop
-  {
+fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wait: u8, since: u64, download_folder: &str,
+  download_cloud_media: bool, download_local_media: bool) {
+  loop {
     let current_time = Utc::now();
     println!("Checking at: {}", current_time);
 
@@ -212,44 +249,121 @@ fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, sin
 
     let mut page = 1;
     let mut nothing = true;
-    loop
-    {
-      let url = format!("https://{}/api/v1/accounts/{}/media/changed?since={}&page={}",
-      domain, session.account.account_id, timestamp, page);
-      match blink_get(url, auth_header.clone())
-      {
-        Ok(txt) => {
-          let vids = serde_json::from_str::<Media>(&txt).unwrap();
-  
-          if vids.media.is_empty()
-          {
+
+    if download_cloud_media {
+      loop {
+        let url = format!("https://{}/api/v1/accounts/{}/media/changed?since={}&page={}",
+        regional_domain, session.account.account_id, timestamp, page);
+
+        match blink_get(&url, auth_header.clone()) {
+          Ok(txt) => {
+            let vids = serde_json::from_str::<Media>(&txt).unwrap();
+          
+            if vids.media.is_empty() {
+              break;
+            }
+    
+            for video in vids.media {
+              let output = format!("./{}/{}_{}_{}.mp4",
+              download_folder, video.network_name, video.device_name, video.created_at.replace(":", "-"));
+    
+              if video.deleted || fs::metadata(output.clone()).is_ok() {
+                continue;
+              } else {
+                nothing = false;
+              }
+    
+              fs::create_dir_all(format!("./{}", download_folder)).unwrap();
+    
+              let url = format!("https://{}{}", regional_domain, video.media);
+              for _ in 1..10 {
+                if download_video(&url, auth_header.clone(), &output).is_ok() {
+                  break;
+                }
+              }
+            }
+    
+            page += 1;
+          },
+          Err(_) => {
             break;
           }
-  
-          for video in vids.media
-          {
-            let output = format!("./downloads/{}_{}_{}.mp4",
-            video.network_name, video.device_name, video.created_at);
-  
-            if video.deleted || fs::metadata(output.clone()).is_ok() {
+        }
+      }
+    }
+
+    if download_local_media {
+      let url_homescreen = format!("https://{}/api/v3/accounts/{}/homescreen", regional_domain, session.account.account_id);
+      match blink_get(&url_homescreen, auth_header.clone()) {
+        Ok(res) => {
+          let homescreen = serde_json::from_str::<Homescreen>(&res).unwrap();
+          
+          if homescreen.sync_modules.is_empty() {
+            continue;
+          }
+
+          for sync_module in homescreen.clone().sync_modules {
+            let mut network_name: String = String::from("unkown");
+            if sync_module.local_storage_status != String::from("active") {
               continue;
+            } else {
+              for network in homescreen.clone().networks {
+                if network.id == sync_module.network_id {
+                  network_name = network.name;
+                  println!("  Currently checking: \"{}\"", network_name);
+                  break;
+                }
+              }
             }
-            else
-            {
-              nothing = false;
-            }
-  
-            fs::create_dir_all("./downloads").unwrap();
-  
-            let url = format!("https://{}{}", domain, video.media);
+
+            let url_manifest_id = format!("https://{}/api/v1/accounts/{}/networks/{}/sync_modules/{}/local_storage/manifest/request",
+            regional_domain, session.account.account_id, sync_module.network_id, sync_module.id);
+
+            let manifest_info = if let Ok(res) = blink_post(&url_manifest_id, auth_header.clone(), None, String::from("")) {
+              serde_json::from_str::<SyncManifestInfo>(&res).unwrap()
+            } else {
+              continue;
+            };
+
+            let url_manifest = format!("{}/{}", url_manifest_id, manifest_info.id);
+
+            let full_manifest: SyncManifest;
             loop {
-              if download_video(&url, auth_header.clone(), &output).is_ok() {
+              if let Ok(res) = blink_get(&url_manifest, auth_header.clone()) {
+                full_manifest = serde_json::from_str::<SyncManifest>(&res).unwrap();
                 break;
+              }
+              thread::sleep(Duration::from_secs(10 as u64));  
+            }
+
+            for video in full_manifest.clips {
+              let output = format!("./{}/{}_{}_{}.mp4",
+              download_folder, network_name, video.camera_name, video.created_at.replace(":", "-"));
+
+              if fs::metadata(output.clone()).is_ok() {
+                continue;
+              } else {
+                nothing = false;
+              }
+
+              // The clip has to be uploaded to blink's servers to download it.
+              let url_clip = format!("https://{}/api/v1/accounts/{}/networks/{}/sync_modules/{}/local_storage/manifest/{}/clip/request/{}",
+              regional_domain, session.account.account_id, sync_module.network_id, sync_module.id, manifest_info.id, video.id);
+              if let Err(_) = blink_post(&url_clip, auth_header.clone(), None, String::from("")) {
+                continue;
+              };
+    
+              fs::create_dir_all(format!("./{}", download_folder)).unwrap();
+    
+              for _ in 1..10 {
+                if download_video(&url_clip, auth_header.clone(), &output).is_ok() {
+                  thread::sleep(Duration::from_secs(3 as u64));
+                  break;
+                }
+                thread::sleep(Duration::from_secs(3 as u64));
               }
             }
           }
-  
-          page += 1;
         },
         Err(_) => {
           return;
@@ -257,12 +371,9 @@ fn blink_sync(domain: String, session: Login, auth_header: Header, wait: u8, sin
       }
     }
 
-    if nothing
-    {
+    if nothing {
       println!("Nothing new to download.");
-    }
-    else
-    {
+    } else {
       println!("Done.")
     }
 
@@ -279,8 +390,7 @@ fn download_video(url: &String, auth_header: Header, output: &String) -> Result<
     .body(()).unwrap()
   .send();
 
-  if request.is_err()
-  {
+  if request.is_err() {
     return Err(());
   }
 
@@ -296,38 +406,36 @@ fn download_video(url: &String, auth_header: Header, output: &String) -> Result<
 }
 
 
-fn blink_get(url: String, header: Header) -> Result<String, ()>
-{
+fn blink_get(url: &String, header: Header) -> Result<String, ()> {
   let request = Request::get(url)
     .method(Method::GET)
     .header(header.key, header.value)
-  .body(()).unwrap()
+    .body(()).unwrap()
   .send();
 
-  if request.is_err()
-  {
+  if request.is_err() {
     println!("Error: {}", request.unwrap_err().to_string());
     return Err(());
   }
 
   let mut response = request.unwrap();
 
-  match response.status()
-  {
+  match response.status() {
     StatusCode::OK => {
       Ok(response.text().unwrap())
     }
     _ => {
-      println!("Error: {}", response.text().unwrap());
+      if ! response.text().unwrap().contains("Manifest command is in process") {
+        println!("Error: {}", response.text().unwrap());
+      }
       Err(())
     }
   }
 }
 
-fn blink_post(domain: &str, url: &str, header: Header, header2: Option<Header>, body: String) -> Result<String, ()>
-{
+fn blink_post(url: &String, header: Header, header2: Option<Header>, body: String) -> Result<String, ()> {
   let mut builder = Request::builder()
-    .uri(format!("https://{}/{}", domain, url))
+    .uri(url)
     .method(Method::POST)
   .header(header.key, header.value);
 
@@ -335,18 +443,20 @@ fn blink_post(domain: &str, url: &str, header: Header, header2: Option<Header>, 
     builder = builder.header(header.key, header.value);
   }
 
-  let request = builder.body(body).unwrap().send();
+  let request = if ! body.is_empty() {
+    builder.body(body).unwrap().send()
+  } else {
+    builder.body(()).unwrap().send()
+  };
 
-  if request.is_err()
-  {
+  if request.is_err() {
     println!("Error: {}", request.unwrap_err().to_string());
     return Err(());
   }
 
   let mut response = request.unwrap();
 
-  match response.status()
-  {
+  match response.status() {
     StatusCode::OK => {
       Ok(response.text().unwrap())
     }
@@ -357,8 +467,7 @@ fn blink_post(domain: &str, url: &str, header: Header, header2: Option<Header>, 
   }
 }
 
-fn get_input() -> String
-{
+fn get_input() -> String {
   io::stdout().flush().expect("Failed to flush stdout");
   let mut input = String::new();
   io::stdin().read_line(&mut input).unwrap();
