@@ -91,8 +91,6 @@ struct LocalClips {
 #[derive(Debug, Deserialize)]
 struct CommandStatus {
   complete: bool,
-  status: u8,
-  status_msg: String
 }
 
 fn main() -> ExitCode {
@@ -232,10 +230,10 @@ fn main() -> ExitCode {
               println!("Invalid pin provided. Please try again ...");
             } else {
               println!("Success");
-              blink_sync(&global_domain, &region_domain, json_res, auth_header, *wait, since, download_folder, download_cloud_media, download_local_media);
+              blink_sync(&region_domain, json_res, auth_header, *wait, since, download_folder, download_cloud_media, download_local_media);
             }
           } else {
-            blink_sync(&global_domain, &region_domain, json_res, auth_header, *wait, since, download_folder, download_cloud_media, download_local_media);
+            blink_sync(&region_domain, json_res, auth_header, *wait, since, download_folder, download_cloud_media, download_local_media);
             thread::sleep(Duration::from_secs(*wait as u64));
           }
         } else {
@@ -262,9 +260,9 @@ fn gen_uid(size: usize, uid_format: bool) -> String {
       gen_random_hex(2, &mut rng),
       gen_random_hex(6, &mut rng)
     );
-    return uid;
+    uid
   } else {
-    return gen_random_hex(size, &mut rng);
+    gen_random_hex(size, &mut rng)
   }
 }
 
@@ -277,7 +275,7 @@ fn gen_random_hex(size: usize, rng: &mut ThreadRng) -> String {
   hex_string
 }
 
-fn blink_sync(global_domain: &String, regional_domain: &String, session: Login, auth_header: Header, wait: u8, since: u64, download_folder: &str,
+fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wait: u8, since: u64, download_folder: &str,
   download_cloud_media: bool, download_local_media: bool) {
   loop {
     let current_time = Utc::now();
@@ -303,7 +301,7 @@ fn blink_sync(global_domain: &String, regional_domain: &String, session: Login, 
     
             for video in vids.media {
               let output = format!("./{}/{}_{}_{}.mp4",
-              download_folder, video.network_name, video.device_name, video.created_at.replace(":", "-"));
+              download_folder, video.network_name, video.device_name, video.created_at.replace(':', "-"));
     
               if video.deleted || fs::metadata(output.clone()).is_ok() {
                 continue;
@@ -342,7 +340,7 @@ fn blink_sync(global_domain: &String, regional_domain: &String, session: Login, 
 
           for sync_module in homescreen.clone().sync_modules {
             let mut network_name: String = String::from("unkown");
-            if sync_module.local_storage_status != String::from("active") {
+            if sync_module.local_storage_status != *"active" {
               continue;
             } else {
               for network in homescreen.clone().networks {
@@ -371,12 +369,12 @@ fn blink_sync(global_domain: &String, regional_domain: &String, session: Login, 
                 full_manifest = serde_json::from_str::<SyncManifest>(&res).unwrap();
                 break;
               }
-              thread::sleep(Duration::from_secs(5 as u64));  
+              thread::sleep(Duration::from_secs(5));  
             }
 
             for video in full_manifest.clips {
               let output = format!("./{}/{}_{}_{}.mp4",
-              download_folder, network_name, video.camera_name, video.created_at.replace(":", "-"));
+              download_folder, network_name, video.camera_name, video.created_at.replace(':', "-"));
               
               fs::create_dir_all(format!("./{}", download_folder)).unwrap();
               if fs::metadata(output.clone()).is_ok() {
@@ -390,7 +388,7 @@ fn blink_sync(global_domain: &String, regional_domain: &String, session: Login, 
               regional_domain, session.account.account_id, sync_module.network_id, sync_module.id, full_manifest.manifest_id, video.id);
               'upload: for _ in 1..4 {
                 if let Ok(res) = blink_post(&url_clip, auth_header.clone(), None, None) {
-                  thread::sleep(Duration::from_secs(2 as u64));
+                  thread::sleep(Duration::from_secs(2));
                   let upload_id = serde_json::from_str::<SyncManifestInfo>(&res).unwrap().id;
                   let url_upload_state = format!("https://{}/network/{}/command/{}", regional_domain, sync_module.network_id, upload_id);
                   for _ in 0..6 {
@@ -400,15 +398,15 @@ fn blink_sync(global_domain: &String, regional_domain: &String, session: Login, 
                         if download_video(&url_clip, auth_header.clone(), &output).is_err() {
                           println!("Download Failed. Trying next clip ...");
                         }
-                        thread::sleep(Duration::from_secs(2 as u64));
+                        thread::sleep(Duration::from_secs(2));
                         break 'upload;
                       }
                     }
-                    thread::sleep(Duration::from_secs(2 as u64));
+                    thread::sleep(Duration::from_secs(2));
                   }
                 } else {
                   println!("Upload failed. Continuing in 10 seconds ...");
-                  thread::sleep(Duration::from_secs(10 as u64));
+                  thread::sleep(Duration::from_secs(10));
                   continue;
                 };
               }
@@ -470,7 +468,7 @@ fn blink_get(url: &String, header: Header) -> Result<String, ()> {
   .send();
 
   if request.is_err() {
-    println!("Error: {}", request.unwrap_err().to_string());
+    println!("Error: {}", request.unwrap_err());
     return Err(());
   }
 
@@ -502,14 +500,14 @@ fn blink_post(url: &String, header: Header, header2: Option<Header>, body: Optio
     builder = builder.header(header.key, header.value);
   }
 
-  let request = if body.is_some() {
-    builder.body(body.unwrap()).unwrap().send()
+  let request = if let Some(body_str) = body {
+    builder.body(body_str).unwrap().send()
   } else {
     builder.body(()).unwrap().send()
   };
 
   if request.is_err() {
-    println!("Error: {}", request.unwrap_err().to_string());
+    println!("Error: {}", request.unwrap_err());
     return Err(());
   }
 
