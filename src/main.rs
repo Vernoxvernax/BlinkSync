@@ -372,7 +372,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
               thread::sleep(Duration::from_secs(5));  
             }
 
-            for video in full_manifest.clips {
+            'clips: for video in full_manifest.clips {
               let output = format!("./{}/{}_{}_{}.mp4",
               download_folder, network_name, video.camera_name, video.created_at.replace(':', "-"));
               
@@ -407,7 +407,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
                 } else {
                   println!("Upload failed. Continuing in 10 seconds ...");
                   thread::sleep(Duration::from_secs(10));
-                  continue;
+                  break 'clips;
                 };
               }
             }
