@@ -214,28 +214,23 @@ fn main() -> ExitCode {
 
             let url = format!("https://{}/api/v4/account/{}/client/{}/pin/verify", region_domain, json_res.account.account_id, json_res.account.client_id);
 
-            let header: Header = Header {
-              key: "Content-Type".to_string(),
-              value: "application/json".to_string()
-            };
-
             let auth_header: Header = Header {
               key: "TOKEN-AUTH".to_string(),
               value: json_res.auth.token.clone()
             };
 
-            let verify_request = blink_post(&url, header, Some(auth_header.clone()), Some(format!("{{\"pin\": {} }}", pin)));
+            let verify_request = blink_post(&url, header.clone(), Some(auth_header.clone()), Some(format!("{{\"pin\": {} }}", pin)));
 
             if verify_request.is_err() {
-              println!("Invalid pin provided. Please try again ...");
+              eprintln!("Invalid pin provided. Please try again ...");
+              continue;
             } else {
               println!("Success");
-              blink_sync(&region_domain, json_res, auth_header, *wait, since, download_folder, download_cloud_media, download_local_media);
             }
-          } else {
-            blink_sync(&region_domain, json_res, auth_header, *wait, since, download_folder, download_cloud_media, download_local_media);
-            thread::sleep(Duration::from_secs(*wait as u64));
           }
+
+          blink_sync(&region_domain, json_res, auth_header, *wait, since, download_folder, download_cloud_media, download_local_media);
+          thread::sleep(Duration::from_secs(*wait as u64));
         } else {
           println!("Failed to login. Retrying ...");
           thread::sleep(Duration::from_secs(*wait as u64));
@@ -313,13 +308,22 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
     
               let url = format!("https://{}{}", regional_domain, video.media);
               for _ in 1..10 {
-                if download_video(&url, auth_header.clone(), &output).is_ok() {
-                  break;
+                match download_video(&url, auth_header.clone(), &output) {
+                  Ok(()) => {
+                    break;
+                  }
+                  Err(Some(StatusCode::UNAUTHORIZED)) => {
+                    return;
+                  },
+                  _ => ()
                 }
               }
             }
     
             page += 1;
+          },
+          Err(Some(StatusCode::UNAUTHORIZED)) => {
+            return;
           },
           Err(_) => {
             break;
@@ -355,21 +359,35 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
             let url_manifest_id = format!("https://{}/api/v1/accounts/{}/networks/{}/sync_modules/{}/local_storage/manifest/request",
             regional_domain, session.account.account_id, sync_module.network_id, sync_module.id);
 
-            let manifest_info = if let Ok(res) = blink_post(&url_manifest_id, auth_header.clone(), None, None) {
-              serde_json::from_str::<SyncManifestInfo>(&res).unwrap()
-            } else {
-              continue;
+            let manifest_info = match blink_post(&url_manifest_id, auth_header.clone(), None, None) {
+              Ok(res) => {
+                serde_json::from_str::<SyncManifestInfo>(&res).unwrap()
+              },
+              Err(Some(StatusCode::UNAUTHORIZED)) => {
+                return;
+              },
+              Err(_) => {
+                continue;
+              }
             };
 
             let url_manifest = format!("{}/{}", url_manifest_id, manifest_info.id);
 
             let full_manifest: SyncManifest;
             loop {
-              if let Ok(res) = blink_get(&url_manifest, auth_header.clone()) {
-                full_manifest = serde_json::from_str::<SyncManifest>(&res).unwrap();
-                break;
+              match blink_get(&url_manifest, auth_header.clone()) {
+                Ok(res) => {
+                  full_manifest = serde_json::from_str::<SyncManifest>(&res).unwrap();
+                  break;
+                },
+                Err(Some(StatusCode::UNAUTHORIZED)) => {
+                  return;
+                },
+                Err(_) => {
+                  thread::sleep(Duration::from_secs(5));  
+                  continue;
+                }
               }
-              thread::sleep(Duration::from_secs(5));  
             }
 
             'clips: for video in full_manifest.clips {
@@ -387,31 +405,46 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
               let url_clip = format!("https://{}/api/v1/accounts/{}/networks/{}/sync_modules/{}/local_storage/manifest/{}/clip/request/{}",
               regional_domain, session.account.account_id, sync_module.network_id, sync_module.id, full_manifest.manifest_id, video.id);
               'upload: for _ in 1..4 {
-                if let Ok(res) = blink_post(&url_clip, auth_header.clone(), None, None) {
-                  thread::sleep(Duration::from_secs(2));
-                  let upload_id = serde_json::from_str::<SyncManifestInfo>(&res).unwrap().id;
-                  let url_upload_state = format!("https://{}/network/{}/command/{}", regional_domain, sync_module.network_id, upload_id);
-                  for _ in 0..6 {
-                    if let Ok(res) = blink_get(&url_upload_state, auth_header.clone()) {
-                      let command_status = serde_json::from_str::<CommandStatus>(&res).unwrap();
-                      if command_status.complete {
-                        if download_video(&url_clip, auth_header.clone(), &output).is_err() {
-                          println!("Download Failed. Trying next clip ...");
-                        }
-                        thread::sleep(Duration::from_secs(2));
-                        break 'upload;
-                      }
-                    }
+                match blink_post(&url_clip, auth_header.clone(), None, None) {
+                  Ok(res) => {
                     thread::sleep(Duration::from_secs(2));
+                    let upload_id = serde_json::from_str::<SyncManifestInfo>(&res).unwrap().id;
+                    let url_upload_state = format!("https://{}/network/{}/command/{}", regional_domain, sync_module.network_id, upload_id);
+                    for _ in 0..6 {
+                      if let Ok(res) = blink_get(&url_upload_state, auth_header.clone()) {
+                        let command_status = serde_json::from_str::<CommandStatus>(&res).unwrap();
+                        if command_status.complete {
+                          match download_video(&url_clip, auth_header.clone(), &output) {
+                            Err(Some(StatusCode::UNAUTHORIZED)) => {
+                              return;
+                            },
+                            Err(_) => {
+                              println!("Download Failed. Trying next clip ...");
+                            }
+                            _ => ()
+                          }
+                          thread::sleep(Duration::from_secs(2));
+                          break 'upload;
+                        }
+                      }
+                      thread::sleep(Duration::from_secs(2));
+                    }
+                  },
+                  Err(Some(StatusCode::UNAUTHORIZED)) => {
+                    return;
+                  },
+                  Err(_) => {
+                    println!("Upload failed. Continuing in 10 seconds ...");
+                    thread::sleep(Duration::from_secs(10));
+                    break 'clips;
                   }
-                } else {
-                  println!("Upload failed. Continuing in 10 seconds ...");
-                  thread::sleep(Duration::from_secs(10));
-                  break 'clips;
-                };
+                }
               }
             }
           }
+        },
+        Err(Some(StatusCode::UNAUTHORIZED)) => {
+          return;
         },
         Err(_) => {
           return;
@@ -429,7 +462,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
   }
 }
 
-fn download_video(url: &String, auth_header: Header, output: &String) -> Result<(), ()>
+fn download_video(url: &String, auth_header: Header, output: &String) -> Result<(), Option<StatusCode>>
 {
   let request = Request::builder()
     .method(Method::GET)
@@ -442,22 +475,32 @@ fn download_video(url: &String, auth_header: Header, output: &String) -> Result<
   .send();
 
   if request.is_err() {
-    return Err(());
+    return Err(None);
   }
 
   let res = request.unwrap();
 
-  println!("Saving: {:?}", output);
-
-  let mut file = File::create(output).unwrap();
-  if copy(&mut res.into_body(), &mut file).is_err() {
-    return Err(());
-  };
-  Ok(())
+  match res.status() {
+    StatusCode::OK => {
+      println!("Saving: {:?}", output);
+      let mut file = File::create(output).unwrap();
+      if copy(&mut res.into_body(), &mut file).is_err() {
+        return Err(None);
+      };
+      Ok(())
+    },
+    StatusCode::UNAUTHORIZED => {
+      eprintln!("Session expired. Renewing ...");
+      Err(Some(StatusCode::UNAUTHORIZED))
+    },
+    _ => {
+      Err(Some(res.status()))
+    }
+  }
 }
 
 
-fn blink_get(url: &String, header: Header) -> Result<String, ()> {
+fn blink_get(url: &String, header: Header) -> Result<String, Option<StatusCode>> {
   let request = Request::get(url)
     .method(Method::GET)
     .header(header.key, header.value)
@@ -468,8 +511,8 @@ fn blink_get(url: &String, header: Header) -> Result<String, ()> {
   .send();
 
   if request.is_err() {
-    println!("Error: {}", request.unwrap_err());
-    return Err(());
+    eprintln!("Error: {}\n \"{}\"", request.unwrap_err(), url);
+    return Err(None);
   }
 
   let mut response = request.unwrap();
@@ -477,17 +520,21 @@ fn blink_get(url: &String, header: Header) -> Result<String, ()> {
   match response.status() {
     StatusCode::OK => {
       Ok(response.text().unwrap())
-    }
+    },
+    StatusCode::UNAUTHORIZED => {
+      eprintln!("Session expired. Renewing ...");
+      Err(Some(StatusCode::UNAUTHORIZED))
+    },
     _ => {
       if ! response.text().unwrap().contains("Manifest command is in process") {
-        println!("Error: {}", response.text().unwrap());
+        eprintln!("Error: {}\n \"{}\": {}", response.text().unwrap(), url, response.status());
       }
-      Err(())
+      Err(None)
     }
   }
 }
 
-fn blink_post(url: &String, header: Header, header2: Option<Header>, body: Option<String>) -> Result<String, ()> {
+fn blink_post(url: &String, header: Header, header2: Option<Header>, body: Option<String>) -> Result<String, Option<StatusCode>> {
   let mut builder = Request::builder()
     .uri(url)
     .method(Method::POST)
@@ -507,8 +554,8 @@ fn blink_post(url: &String, header: Header, header2: Option<Header>, body: Optio
   };
 
   if request.is_err() {
-    println!("Error: {}", request.unwrap_err());
-    return Err(());
+    eprintln!("Error: {}\n \"{}\"", request.unwrap_err(), url);
+    return Err(None);
   }
 
   let mut response = request.unwrap();
@@ -516,10 +563,14 @@ fn blink_post(url: &String, header: Header, header2: Option<Header>, body: Optio
   match response.status() {
     StatusCode::OK => {
       Ok(response.text().unwrap())
-    }
+    },
+    StatusCode::UNAUTHORIZED => {
+      eprintln!("Session expired. Renewing ...");
+      Err(Some(StatusCode::UNAUTHORIZED))
+    },
     _ => {
-      println!("Error: {}", response.text().unwrap());
-      Err(())
+      eprintln!("Error: {}\n \"{}\": {}", response.text().unwrap(), url, response.status());
+      Err(None)
     }
   }
 }
