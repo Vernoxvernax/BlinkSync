@@ -372,7 +372,6 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
             };
 
             let url_manifest = format!("{}/{}", url_manifest_id, manifest_info.id);
-
             let full_manifest: SyncManifest;
             loop {
               match blink_get(&url_manifest, auth_header.clone()) {
@@ -380,7 +379,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
                   full_manifest = serde_json::from_str::<SyncManifest>(&res).unwrap();
                   break;
                 },
-                Err(Some(StatusCode::UNAUTHORIZED)) => {
+                Err(Some(StatusCode::UNAUTHORIZED)) | Err(Some(StatusCode::BAD_REQUEST)) => {
                   return;
                 },
                 Err(_) => {
