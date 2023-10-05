@@ -379,12 +379,12 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
                   full_manifest = serde_json::from_str::<SyncManifest>(&res).unwrap();
                   break;
                 },
-                Err(Some(StatusCode::UNAUTHORIZED)) | Err(Some(StatusCode::BAD_REQUEST)) => {
-                  return;
-                },
-                Err(_) => {
+                Err(None) => {
                   thread::sleep(Duration::from_secs(5));  
                   continue;
+                }
+                Err(_) => {
+                  return;
                 }
               }
             }
