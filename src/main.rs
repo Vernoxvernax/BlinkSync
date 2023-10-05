@@ -520,9 +520,9 @@ fn blink_get(url: &String, header: Header) -> Result<String, Option<StatusCode>>
     StatusCode::OK => {
       Ok(response.text().unwrap())
     },
-    StatusCode::UNAUTHORIZED => {
+    StatusCode::UNAUTHORIZED | StatusCode::BAD_REQUEST => {
       eprintln!("Session expired. Renewing ...");
-      Err(Some(StatusCode::UNAUTHORIZED))
+      Err(Some(response.status()))
     },
     _ => {
       if ! response.text().unwrap().contains("Manifest command is in process") {
