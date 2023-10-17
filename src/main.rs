@@ -376,8 +376,12 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
             loop {
               match blink_get(&url_manifest, auth_header.clone()) {
                 Ok(res) => {
-                  full_manifest = serde_json::from_str::<SyncManifest>(&res).unwrap();
-                  break;
+                  if let Ok(json) = serde_json::from_str::<SyncManifest>(&res) {
+                    full_manifest = json; 
+                    break;
+                  } else {
+                    return;
+                  }
                 },
                 Err(None) => {
                   thread::sleep(Duration::from_secs(5));  
