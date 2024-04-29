@@ -1,16 +1,25 @@
 #![allow(non_snake_case)]
-
-use std::{process::ExitCode, io::{self, Write, copy}, thread, time::Duration, fs::{self, File}};
+use std::{fs::{self, File}, io::{self, copy, Read, Write}, path::Path, process::ExitCode, thread, time::Duration};
 use clap::{Arg, Command, ArgAction};
-use isahc::{Request, RequestExt, ReadResponseExt, prelude::Configurable};
-use http::{StatusCode, Method};
-use rand::{Rng, rngs::ThreadRng};
-use serde_derive::Deserialize;
+use isahc::{http::StatusCode, prelude::Configurable, ReadResponseExt, Request, RequestExt};
+use serde_derive::{Deserialize, Serialize};
 use chrono::Utc;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const USER_AGENT: &str = "Blink/2404031508 CFNetwork/1220.1 Darwin/20.3.0";
 
-const USER_AGENT: &str = "Blink/2309051925 CFNetwork/1220.1 Darwin/20.3.0";
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PostLogin {
+  email: String,
+  password: String,
+  reauth: bool,
+  unique_id: String
+}
+
+#[derive(Serialize, Deserialize)]
+struct ConfigFile {
+  uuid: String
+}
 
 #[derive(Debug, Clone)]
 struct Header {
@@ -34,12 +43,12 @@ struct Video {
 
 #[derive(Debug, Deserialize)]
 struct Login {
-  account: AccountLogin,
+  account: Account,
   auth: Auth
 }
 
 #[derive(Debug, Deserialize)]
-struct AccountLogin {
+struct Account {
   account_id: u64,
   client_id: u64,
   tier: String,
@@ -78,7 +87,7 @@ struct SyncManifestInfo {
 #[derive(Debug, Deserialize)]
 struct SyncManifest {
   manifest_id: String,
-  clips: Vec<LocalClips>
+  media: Vec<LocalClips>
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,9 +203,17 @@ fn main() -> ExitCode {
         key: "Content-Type".to_string(),
         value: "application/json".to_string()
       };
-      let body: String = format!("{{\"email\":\"{}\",\"password\":\"{}\",\"unique_id\":\"{}\",\"device_identifier\":\"BlinkApp\",\"client_name\":\"Computer\",\"reauth\":\"true\"}}", email, password, gen_uid(16, true));
+
+      let body = PostLogin {
+        email: email.to_string(),
+        password: password.to_string(),
+        reauth: true,
+        unique_id: get_uuid()
+      };
+      let json_body = serde_json::to_string(&body).unwrap();
+
       loop {
-        if let Ok(res) = blink_post(&format!("https://{}/api/v5/account/login", global_domain), header.clone(), None, Some(body.clone())) {
+        if let Ok(res) = blink_post(&format!("https://{}/api/v5/account/login", global_domain), header.clone(), None, Some(json_body.clone())) {
           let json_res = serde_json::from_str::<Login>(&res).unwrap();
           let region_domain = if cli.get_one::<String>("domain").is_some() {
             cli.get_one::<String>("domain").unwrap().to_string()
@@ -243,31 +260,25 @@ fn main() -> ExitCode {
   ExitCode::SUCCESS
 }
 
-fn gen_uid(size: usize, uid_format: bool) -> String {
-  let mut rng = rand::thread_rng();
-
-  if uid_format {
-    let uid = format!(
-      "BlinkCCamera_{}-{}-{}-{}-{}",
-      gen_random_hex(4, &mut rng),
-      gen_random_hex(2, &mut rng),
-      gen_random_hex(2, &mut rng),
-      gen_random_hex(2, &mut rng),
-      gen_random_hex(6, &mut rng)
-    );
-    uid
+fn get_uuid() -> String {
+  let path = Path::new("./config.toml");
+  if path.exists() {
+    if let Ok(mut file) = File::open(path) {
+      let mut content = String::new();
+      file.read_to_string(&mut content).unwrap();
+      let config: ConfigFile = toml::from_str(&content).unwrap();
+      return config.uuid;
+    }
+  }
+  let uuid = uuid::Uuid::new_v4().to_string().to_uppercase();
+  if let Ok(mut file) = File::create(path) {
+    if let Err(err) = file.write_all(toml::to_string(&ConfigFile{uuid: uuid.clone()}).unwrap().as_bytes()) {
+      println!("Failed to write to file: {}", err);
+    }
   } else {
-    gen_random_hex(size, &mut rng)
+    println!("Failed to create file.");
   }
-}
-
-fn gen_random_hex(size: usize, rng: &mut ThreadRng) -> String {
-  let mut hex_string = String::new();
-  for _ in 0..size {
-    let digit: u8 = rng.gen_range(0..16);
-    hex_string.push_str(&format!("{:x}", digit));
-  }
-  hex_string
+  uuid
 }
 
 fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wait: u8, since: u64, download_folder: &str,
@@ -333,7 +344,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
     }
 
     if download_local_media {
-      let url_homescreen = format!("https://{}/api/v3/accounts/{}/homescreen", regional_domain, session.account.account_id);
+      let url_homescreen = format!("https://{}/api/v4/accounts/{}/homescreen", regional_domain, session.account.account_id);
       match blink_get(&url_homescreen, auth_header.clone()) {
         Ok(res) => {
           let homescreen = serde_json::from_str::<Homescreen>(&res).unwrap();
@@ -371,7 +382,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
               }
             };
 
-            let url_manifest = format!("{}/{}", url_manifest_id, manifest_info.id);
+            let url_manifest = format!("{}media/{}", url_manifest_id.trim_end_matches("manifest/request"), manifest_info.id);
             let full_manifest: SyncManifest;
             loop {
               match blink_get(&url_manifest, auth_header.clone()) {
@@ -393,7 +404,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
               }
             }
 
-            'clips: for video in full_manifest.clips {
+            'clips: for video in full_manifest.media {
               let output = format!("./{}/{}_{}_{}.mp4",
               download_folder, network_name, video.camera_name, video.created_at.replace(':', "-"));
               
@@ -467,9 +478,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
 
 fn download_video(url: &String, auth_header: Header, output: &String) -> Result<(), Option<StatusCode>>
 {
-  let request = Request::builder()
-    .method(Method::GET)
-    .uri(url)
+  let request = Request::get(url)
     .header(auth_header.key, auth_header.value)
     .header("User-Agent", USER_AGENT)
     .header("content-type", "application/json")
@@ -505,7 +514,6 @@ fn download_video(url: &String, auth_header: Header, output: &String) -> Result<
 
 fn blink_get(url: &String, header: Header) -> Result<String, Option<StatusCode>> {
   let request = Request::get(url)
-    .method(Method::GET)
     .header(header.key, header.value)
     .header("content-type", "application/json")
     .header("User-Agent", USER_AGENT)
@@ -538,9 +546,7 @@ fn blink_get(url: &String, header: Header) -> Result<String, Option<StatusCode>>
 }
 
 fn blink_post(url: &String, header: Header, header2: Option<Header>, body: Option<String>) -> Result<String, Option<StatusCode>> {
-  let mut builder = Request::builder()
-    .uri(url)
-    .method(Method::POST)
+  let mut builder = Request::post(url)
     .header(header.key, header.value)
     .header("User-Agent", USER_AGENT)
     .header("content-type", "application/json")
