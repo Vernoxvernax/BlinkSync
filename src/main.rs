@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use std::{fs::{self, File}, io::{self, copy, Read, Write}, path::Path, process::ExitCode, thread, time::Duration};
+use std::{fs::{self, File}, io::{self, copy, Read, Write}, path::Path, process::{exit, ExitCode}, thread, time::Duration};
 use clap::{Arg, Command, ArgAction};
 use isahc::{http::StatusCode, prelude::Configurable, ReadResponseExt, Request, RequestExt};
 use serde_derive::{Deserialize, Serialize};
@@ -86,14 +86,14 @@ struct SyncManifestInfo {
 
 #[derive(Debug, Deserialize)]
 struct SyncManifest {
-  manifest_id: String,
+  manifest_id: u64,
   media: Vec<LocalClips>
 }
 
 #[derive(Debug, Deserialize)]
 struct LocalClips {
-  id: String,
-  camera_name: String,
+  id: u64,
+  device_name: String,
   created_at: String
 }
 
@@ -382,20 +382,23 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
               }
             };
 
+            thread::sleep(Duration::from_secs(2));
+            
             let url_manifest = format!("{}media/{}", url_manifest_id.trim_end_matches("manifest/request"), manifest_info.id);
             let full_manifest: SyncManifest;
             loop {
               match blink_get(&url_manifest, auth_header.clone()) {
                 Ok(res) => {
                   if let Ok(json) = serde_json::from_str::<SyncManifest>(&res) {
-                    full_manifest = json; 
+                    full_manifest = json;
                     break;
                   } else {
-                    return;
+                    eprintln!("Failed to serialize into SyncManifest.");
+                    exit(1);
                   }
                 },
                 Err(None) => {
-                  thread::sleep(Duration::from_secs(5));  
+                  thread::sleep(Duration::from_secs(5));
                   continue;
                 }
                 Err(_) => {
@@ -406,7 +409,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
 
             'clips: for video in full_manifest.media {
               let output = format!("./{}/{}_{}_{}.mp4",
-              download_folder, network_name, video.camera_name, video.created_at.replace(':', "-"));
+              download_folder, network_name, video.device_name, video.created_at.replace(':', "-"));
               
               fs::create_dir_all(format!("./{}", download_folder)).unwrap();
               if fs::metadata(output.clone()).is_ok() {
@@ -515,9 +518,9 @@ fn download_video(url: &String, auth_header: Header, output: &String) -> Result<
 fn blink_get(url: &String, header: Header) -> Result<String, Option<StatusCode>> {
   let request = Request::get(url)
     .header(header.key, header.value)
-    .header("content-type", "application/json")
+    .header("Content-Type", "application/json")
     .header("User-Agent", USER_AGENT)
-    .timeout(Duration::from_secs(20))
+    .timeout(Duration::from_secs(10))
     .body(()).unwrap()
   .send();
 
