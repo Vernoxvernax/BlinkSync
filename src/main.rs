@@ -323,17 +323,19 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
                   Ok(()) => {
                     break;
                   }
-                  Err(Some(StatusCode::UNAUTHORIZED)) => {
+                  Err(Some(StatusCode::UNAUTHORIZED)) | Err(Some(StatusCode::NOT_ACCEPTABLE)) => {
                     return;
                   },
-                  _ => ()
+                  Err(_) => {
+                    continue;
+                  }
                 }
               }
             }
     
             page += 1;
           },
-          Err(Some(StatusCode::UNAUTHORIZED)) => {
+          Err(Some(StatusCode::UNAUTHORIZED)) | Err(Some(StatusCode::NOT_ACCEPTABLE)) => {
             return;
           },
           Err(_) => {
@@ -374,7 +376,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
               Ok(res) => {
                 serde_json::from_str::<SyncManifestInfo>(&res).unwrap()
               },
-              Err(Some(StatusCode::UNAUTHORIZED)) => {
+              Err(Some(StatusCode::UNAUTHORIZED)) | Err(Some(StatusCode::NOT_ACCEPTABLE)) => {
                 return;
               },
               Err(_) => {
@@ -460,7 +462,7 @@ fn blink_sync(regional_domain: &String, session: Login, auth_header: Header, wai
             }
           }
         },
-        Err(Some(StatusCode::UNAUTHORIZED)) => {
+        Err(Some(StatusCode::UNAUTHORIZED)) | Err(Some(StatusCode::NOT_ACCEPTABLE)) => {
           return;
         },
         Err(_) => {
@@ -541,7 +543,7 @@ fn blink_get(url: &String, header: Header) -> Result<String, Option<StatusCode>>
     },
     _ => {
       if ! response.text().unwrap().contains("Manifest command is in process") {
-        eprintln!("Error: {}\n \"{}\": {}", response.text().unwrap(), url, response.status());
+        eprintln!("Error: {} \"{}\": {}", response.text().unwrap(), url, response.status());
       }
       Err(None)
     }
@@ -566,7 +568,7 @@ fn blink_post(url: &String, header: Header, header2: Option<Header>, body: Optio
   };
 
   if request.is_err() {
-    eprintln!("Error: {}\n \"{}\"", request.unwrap_err(), url);
+    eprintln!("Error: {} \"{}\"", request.unwrap_err(), url);
     return Err(None);
   }
 
@@ -581,7 +583,7 @@ fn blink_post(url: &String, header: Header, header2: Option<Header>, body: Optio
       Err(Some(StatusCode::UNAUTHORIZED))
     },
     _ => {
-      eprintln!("Error: {}\n \"{}\": {}", response.text().unwrap(), url, response.status());
+      eprintln!("Error: {} \"{}\": {}", response.text().unwrap(), url, response.status());
       Err(None)
     }
   }
