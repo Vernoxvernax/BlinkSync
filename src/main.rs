@@ -535,7 +535,14 @@ fn blink_get(url: &String, header: Header) -> Result<String, Option<StatusCode>>
 
   match response.status() {
     StatusCode::OK => {
-      Ok(response.text().unwrap())
+      Ok(
+        if let Ok(txt) = response.text() {
+          txt
+        } else {
+          eprintln!("Error: {}\n \"{}\"", response.text().unwrap_err(), url);
+          return Err(None);
+        }
+      )
     },
     StatusCode::UNAUTHORIZED | StatusCode::BAD_REQUEST => {
       eprintln!("Session expired. Renewing ...");
@@ -564,7 +571,7 @@ fn blink_post(url: &String, header: Header, header2: Option<Header>, body: Optio
   let request = if let Some(body_str) = body {
     builder.body(body_str).unwrap().send()
   } else {
-    builder.body(()).unwrap().send()
+    builder.body(String::new()).unwrap().send()
   };
 
   if request.is_err() {
